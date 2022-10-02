@@ -1,7 +1,7 @@
 
 from pytrends.request import TrendReq
 from multiprocessing import Pool
-import json, csv, requests, time, random, logging, sys, numpy as np
+import json, csv, requests, time, random, logging, sys, numpy as np, datetime
 
 def setup_logging():
 	logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
@@ -29,6 +29,11 @@ def check_trend(keyword):
 			logging.error("ChunkedEncodingError, retrying keyword \"%s\"...", keyword)
 			# print("exception: " + str(ex))
 			continue
+		except requests.exceptions.ConnectTimeout as ex:
+			logging.error("ConnectTimeout, retrying keyword \"%s\"...", keyword)
+			# print("exception: " + str(ex))
+			time.sleep(5)
+			continue
 		except requests.exceptions.ProxyError as ex:
 			logging.error("ProxyError, retrying keyword \"%s\"...", keyword)
 			# print("exception: " + str(ex))
@@ -49,6 +54,8 @@ def check_trend(keyword):
 		avg = round((data[keyword])[-52:].mean(),2)
 	except KeyError:
 		logging.error("key \"%s\" was not returned by google trends", keyword)
+		with open("data/manifest-" + datetime.datetime.strftime(datetime.datetime.now(), "%Y-%m-%d") + ".txt", "a") as outfile:
+			outfile.write(keyword + "\n")
 		return
 	
 	#1 Year Mean Compared to 5 Years Ago Mean
@@ -74,24 +81,35 @@ def check_trend(keyword):
 
 	if growth > 100:
 		logging.info("%s %s%%", keyword, str(growth))
-		with open("output.csv", "a") as outfile:
+		with open("data/output-" + datetime.datetime.strftime(datetime.datetime.now(), "%Y-%m-%d") + ".csv", "a") as outfile:
 			writer = csv.writer(outfile)
 			writer.writerow([keyword, str(growth) + "%"])
+	with open("data/manifest-" + datetime.datetime.strftime(datetime.datetime.now(), "%Y-%m-%d") + ".txt", "a") as outfile:
+		outfile.write(keyword + "\n")
 
 def main():
-	with open("keywords.json", "r") as infile:
+	with open("data/keywords.json", "r") as infile:
 		all_keywords = json.load(infile)
 
-	with open("output.csv", "w") as outfile:
+	already_scraped = []
+	try:
+		with open("data/manifest-" + datetime.datetime.strftime(datetime.datetime.now(), "%Y-%m-%d") + ".txt", "r") as infile:
+			already_scraped = infile.read().splitlines()
+	except FileNotFoundError:
+		pass
+
+	keywords = [x for x in all_keywords if x not in already_scraped]
+
+	with open("data/output-" + datetime.datetime.strftime(datetime.datetime.now(), "%Y-%m-%d") + ".csv", "w") as outfile:
 		writer = csv.writer(outfile)
 		writer.writerow(["keyword", "growth"])
 
-	# for keyword in all_keywords:
-	# 	check_trend(keyword)
-	# takes 8:16 to run
+	if len(already_scraped) == len(all_keywords):
+		logging.info("all keywords have already been scraped")
+		return
 
 	with Pool(40) as p:
-		p.map(check_trend, all_keywords)
+		p.map(check_trend, keywords)
 
 if __name__ == "__main__":
 	setup_logging()
